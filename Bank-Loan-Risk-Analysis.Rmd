@@ -1,0 +1,336 @@
+---
+title: "Loan Defaulters - Project"
+author: "Group 4"
+date: "April 17, 2020"
+output: html_document
+---
+
+# Problem Statement
+
+In this project, you will be running the underwriting department of a bank and will decide who would be approved and who would be rejected. Unlike traditional finance-based approaches to this problem, where one distinguishes between good or bad counterparties in a binary way, we seek to anticipate and incorporate both the default and the severity of the losses that result. In doing so, we are building a bridge between traditional banking, where we are looking at reducing the consumption of economic capital, to an asset-management perspective, where we optimize on the risk to the financial investor.
+
+# Libraries
+
+Below are the libraries used to find a feasible solution for the Bank Problem.
+
+```{r}
+library(VIM)
+library(glmnet)
+library(glmnetUtils)
+library(caret)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(randomForest)
+```
+
+# 1. Data Pre-processing
+
+Loading the Training and the Test Datasets in the enviroment.
+
+```{r}
+Bank_raw <- read.csv("train_v3.csv")
+Bank_Test_Raw<-read.csv("test_scenario1_2.csv")
+Prop_interest_Test_Raw <- read.csv("test_scenario3.csv")
+```
+
+Checking how many attributes have misssing or NA values.
+
+```{r}
+colMeans(is.na(Bank_raw)) 
+```
+
+We could see that there are missing values in the training dataset we are imputing these missing values by median of the respective column values.
+
+```{r}
+Bank_raw_NA <- Bank_raw
+for(i in 1:ncol(Bank_raw)){
+  Bank_raw_NA[is.na(Bank_raw_NA[,i]), i] <- median(Bank_raw_NA[,i], na.rm = TRUE)
+}
+colMeans(is.na(Bank_raw_NA))
+```
+
+Thus now we have the dataset with no missing values which will help us with better computation.
+
+Cleaning the test datasets.
+
+```{r}
+Bank_Test <- Bank_Test_Raw
+
+for(i in 1:ncol(Bank_Test_Raw)){
+  Bank_Test[is.na(Bank_Test[,i]), i] <- median(Bank_Test[,i], na.rm = TRUE)  
+}
+
+Prop_interest_Test <- Prop_interest_Test_Raw
+
+for(i in 1:ncol(Prop_interest_Test_Raw)){
+  Prop_interest_Test[is.na(Prop_interest_Test[,i]),i] <- median(Prop_interest_Test[,i],na.rm=TRUE)
+}
+```
+
+Next, we are normalizing the dataset for better prediction using Center and Scale method or Z - score. Using this we are complying the Dimensionlality Reduction.
+
+```{r}
+Bank_Scale<-preProcess(Bank_raw_NA,method = c("center","scale"))   ## normalizating the data for lasso regression
+Norm_Bank<-predict(Bank_Scale,Bank_raw_NA)
+```
+
+#Dimentionality Reduction
+
+```{r}
+dimred <- select(Bank_raw_NA,f3,f5,f55,f67,f70,f80,f82,f102,f103,f111,f112,f132,f136,f145,f153,f180,f190,f198,f200,f218,f221,f222,f238,f241,f251,f270,f281,f286,f290,f293,f294,f295,f296,f314,f315,f323,f361,f373,f374,f383,f384,f398,f413,f428,f471,f479,f514,f518,f522,f526,f533,f536,f546,f556,f588,f604,f617,f620,f631,f650,f652,f655,f663,f665,f666,f673,f674,f676,f682,f704,f705,f709,f734,f740,f747,f752,f771,f775,f776,loss)
+
+TestData_Bank <- select(Bank_Test,f3,f5,f55,f67,f70,f80,f82,f102,f103,f111,f112,f132,f136,f145,f153,f180,f190,f198,f200,f218,f221,f222,f238,f241,f251,f270,f281,f286,f290,f293,f294,f295,f296,f314,f315,f323,f361,f373,f374,f383,f384,f398,f413,f428,f471,f479,f514,f518,f522,f526,f533,f536,f546,f556,f588,f604,f617,f620,f631,f650,f652,f655,f663,f665,f666,f673,f674,f676,f682,f704,f705,f709,f734,f740,f747,f752,f771,f775,f776)
+
+Prop_interest <- select(Prop_interest_Test,f3,f5,f55,f67,f70,f80,f82,f102,f103,f111,f112,f132,f136,f145,f153,f180,f190,f198,f200,f218,f221,f222,f238,f241,f251,f270,f281,f286,f290,f293,f294,f295,f296,f314,f315,f323,f361,f373,f374,f383,f384,f398,f413,f428,f471,f479,f514,f518,f522,f526,f533,f536,f546,f556,f588,f604,f617,f620,f631,f650,f652,f655,f663,f665,f666,f673,f674,f676,f682,f704,f705,f709,f734,f740,f747,f752,f771,f775,f776)
+```
+
+Creating new binary variable for Training classification.
+
+```{r}
+lossbin<-rep(0,80000)
+
+for(i in 1:nrow(dimred)){
+  if(dimred[i,80]>0){
+  lossbin[i]<-1
+  }
+}
+
+dimred$lossbin <- lossbin
+dimred$lossbin <- as.factor(dimred$lossbin)
+dimred1 <- dimred[,-80]
+```
+
+The reduced dimentionality will be used for the regression modelling.
+
+# 2. Modelling
+
+# Lasso Regression
+
+Lasso (least absolute shrinkage and selection operator) is a regression analysis method that performs both variable selection and regularization in order to enhance the prediction accuracy and interpretability of the statistical model it produces.
+
+Here we are using the lasso regression model with the alpha value as 1 and lambda to be 100, and are trying to observe the importance of the Co-efficients and there effect on the model to check the fine region where he model does not overfit.
+
+```{r}
+Lasso_Model<- cv.glmnet(loss~., data = Norm_Bank, alpha = 1, nlambda = 100)
+
+Lasso_Model$lambda.min
+
+coef(Lasso_Model, s = "lambda.min")
+```
+
+The plot is displayed below to check the Lasso Model behaviour.
+
+```{r}
+plot(Lasso_Model)
+```
+
+# Random Forest
+
+Random forests or random decision forests are an ensemble learning method for classification, regression and other tasks that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees. Random decision forests correct for decision trees' habit of overfitting to their training set.
+
+# Classification
+Here we are using classification random forest model to draw the model for bank trainig dataset.
+
+```{r}
+RF_Model <- train(lossbin~., data = dimred1, method = 'rf', ntree = 100)
+RF_Model
+```
+
+The Random forest model here gives us the 90.75% accuracy.
+
+To get the raw probabbilities of the customers if they are the one to be a Defaulters or are will not be Defaulted.
+
+```{r}
+RF_Pred<-predict(RF_Model,banktest11,type = "prob")
+RF_PredDF <- as.data.frame(RF_Pred)
+View(RF_PredDF)
+head(RF_PredDF)
+```
+
+# Regression
+Here we are using regression random forest model to draw the model for bank trainig dataset.
+
+Considering variables where loss is only greater than 0. Thus we have filtered the data based on Loss > 0.
+```{r}
+TrainAtloss_0 <- filter(dimred,loss > 0)
+TrainAt0Loss <- TrainAtloss_0[,-81]
+```
+
+Splitting the data set to perform Hyper Parameter Tuning.
+
+```{r}
+hyper_param <- createDataPartition(TrainAt0Loss$loss,p=0.1,list = FALSE)
+hyper_param1 <- TrainAt0Loss[hyper_param,]
+tunegrid <- expand.grid(.mtry=c(1:40))
+```
+
+Building a Random Forest Regression model using the Zero loss data.
+
+```{r}
+RegRF_Model <- train(loss~.,data = TrainAt0Loss, method='rf', ntree=100, tuneGrid=tunegrid)
+RegRF_Model  ## 29% accuracy
+```
+
+The regression model here gives us an muchlesser accuracy of about 29%.
+
+Predicting the defaulters statistics for test dataset based on regression model.
+
+```{r}
+RegRF_Pred <- predict(RegRF_Model,TestData_Bank)
+RegRF_PredDF <- as.data.frame(RegRF_Pred)
+View(RegRF_PredDF)
+head(RegRF_PredDF)
+```
+
+# 3. Test Scenarios
+
+# Scenario 1
+
+In this scenario, we assume that your bank has a total capital of $1.4B for giving out loans. Loans are all fixed term (5-years), and the annual interest rate is 4.32% for all approved customers. To simplify the problem, we assume that the interest rate is not calculated as a compound rate. That is to say, for example if Mrs. White is taking a loan of $20,000. She will return $20,000 (the capital) plus 5*4.32%*20,000=4320 after five years if she does not default. If she default at 80%, it means that she would pay back only 20% of the capital 20,000*20%=$4,000 and zero interest (i.e. the loss is $16,000 for your bank).  
+You are given the training dataset which contains a list of variables and the target variable that is "loss".  "loss" defines the percentage of the loan at which the customer was defaulted. If "loss" is zero you can imagine that the customer has fully paid back the capital and interest. If the "loss" is greater than zero, it means that the customer has defaulted. "loss" is expressed in percentage so if loss is 10, then it means that the customer has paid pack 90% of the capital but zero interests. 
+Based on this data, you will need to train model(s) to decide which customer listed in the "test_scenario1_2.csv" file (a total of 25471 customers) you would approve and which one you would reject. Obviously, your goal is to maximize the profit for your bank. Based on your decisions, I will calculated the total return after five years (which consists of profits from customers who you approved and paid back the capital and interest and losses from those who you have approved and have defaulted). 
+For this part, you will submit a csv file with 25471 rows each for one customer and a single column containing 1 and 0. 1 means approved, 0 means rejected. 
+Note that there is a column "requested_loan" which shows the requested loan amount in US dollar in . This column does not exist in the train dataset. I leave it up to you how to use this column. 
+
+
+#Solution
+
+Computed Loss based on Random forest modelling.
+
+```{r}
+loss <- data.frame(la=rep(0,25471))
+
+for(i in 1:nrow(Bank_Test)){
+   loss$la[i] <- (RF_PredDF[i,2]*Bank_Test_Raw[i,764]*(RegRF_PredDF[i,1]/100))
+}
+```
+
+Computed Profit based on Random forest modelling.
+
+```{r}
+profit<-data.frame(pr=rep(0,25471))
+for(i in 1:nrow(Bank_Test)){
+  profit$pr[i] <- (RF_PredDF[i,1]*Bank_Test_Raw[i,764]*5*(4.32/100))
+}
+```
+
+Considering cut off profit to accept as 1000,
+
+```{r}
+finalpred1 <- data.frame(final = rep(0,25471))
+
+for(i in 1:nrow(Bank_Test)){
+  if((profit$pr[i]-loss$la[i])>1000){
+    finalpred1$final[i]<-1
+  }
+  else{
+    finalpred1$final[i]<-0
+  }
+}
+
+nrow(filter(finalpred1,final==1))
+```
+
+Thus as we see here 25451 customers are approved for the loan.
+
+```{r}
+finalsum1 <- cbind(Bank_Test,finalpred1)
+finalsumm1<-filter(finalsum1,final==1)
+
+sum(finalsumm1$requested_loan)
+```
+
+We are using upto 1.269 billion dollars of the given 1.4 billion in the presented senario.
+
+# Scenario 2
+
+Exactly similar to scenario 1 but in this case your bank budget to give loans is $450M . Again you need to submit a csv file with 25471 rows each for one customer and a single column containing 1 and 0. 1 means approved, 0 means rejected. 
+
+#Solution
+
+Here we are choosing cutoff profit as 12930 dollars to fit the 450 million dollar budget.
+
+```{r}
+finalpred2 <- data.frame(final=rep(0,25471))
+
+for(i in 1:nrow(Bank_Test)){
+  if((profit$pr[i]-loss$la[i]) > 12930){
+    finalpred2$final[i] <- 1
+  }
+  else{
+    finalpred2$final[i] <- 0
+  }
+}
+```
+
+```{r}
+finalsum2 <- cbind(Bank_Test,finalpred2)
+finalsumm2 <- filter(finalsum2,final==1)
+
+nrow(finalsumm2)
+```
+
+Thus as we see here 5705 customers are approved for the loan.
+
+```{r}
+sum(finalsumm2$requested_loan)
+```
+
+We are using 448 million of given 450 million.
+
+# Scenario 3
+
+In this case, you can see each customer is proposing an interest rate (column "Proposed_Intrest_Rate"). So the interest rate varies for different customers. For this scenario, we assume your bank has $1.4B available to give loans. The requested loan amounts and proposed interest rates are included in the file "test_scenario3.csv"
+
+#Solution
+
+Using the above built Classification model to predict the defaulters in new test dataset.
+
+```{r}
+RF_Pred_prop <- predict(RF_Model, Prop_interest, type = "prob")
+RF_Pred_propDF <- as.data.frame(RF_Pred_prop)
+```
+
+Using the above built Regression model to predict the defaulters in new test dataset.
+
+```{r}
+RegRF_Pred_prop <- predict(RegRF_Model, Prop_interest)
+RegRF_Pred_propDF <- as.data.frame(RegRF_Pred_prop)
+```
+
+Computing the loss and the profit for the test data based on the modelling.
+
+```{r}
+loss_prop <- data.frame(la=rep(0,25471))
+for(i in 1:nrow(Prop_interest_Test)){
+  loss_prop$la[i] <- (RF_Pred_propDF[i,2]*Prop_interest_Test_Raw[i,764]*(RegRF_Pred_propDF[i,1]/100))
+}
+
+profit_prop<-data.frame(pr=rep(0,25471))
+for(i in 1:nrow(prop_intrest2)){
+  profit_prop$pr[i] <- (RF_Pred_propDF[i,1]*Prop_interest_Test_Raw[i,764]*5*(Prop_interest_Test_Raw$Proposed_Intrest_Rate[i]/100))
+}
+```
+
+```{r}
+finalsum3<-cbind(prop_intrest1,finalpred3)
+finalsumm3<-filter(finalsum3,final==1)
+nrow(finalsumm3)
+```
+
+Thus we see hat 24346 customers are approved for loan.
+ 
+```{r}
+sum(finalsumm3$requested_loan)
+```
+
+Using 1.256 billion of 1.4 billion.
+
+```{r}
+Output_1 <- write.csv(finalpred1,"G4_S1.csv")
+Output_2 <- write.csv(finalpred2,"G4_S2.csv")
+Output_3 <- write.csv(finalpred3,"G4_S3.csv")
+```
+
+Generating the prediction files for each senario.
